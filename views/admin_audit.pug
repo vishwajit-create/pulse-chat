@@ -1,0 +1,184 @@
+doctype html
+html(lang="en")
+  head
+    meta(charset="utf-8")
+    meta(name="viewport", content="width=device-width, initial-scale=1.0")
+    title PulseChat - Compliance & Audit Console
+    link(rel="preconnect", href="https://fonts.googleapis.com")
+    link(rel="preconnect", href="https://fonts.gstatic.com", crossorigin)
+    link(href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap", rel="stylesheet")
+    style.
+      :root {
+        --bg: #0b0f19;
+        --surface: #111827;
+        --surface-card: #1f2937;
+        --border: rgba(255, 255, 255, 0.08);
+        --text: #f8fafc;
+        --text-muted: #94a3b8;
+        --primary: #6366f1;
+        --danger: #ef4444;
+        --warning: #f59e0b;
+        --success: #10b981;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+      body { background: var(--bg); color: var(--text); padding: 24px; min-height: 100vh; }
+      .container { max-width: 1280px; margin: 0 auto; }
+      
+      .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; }
+      .title-group h1 { font-size: 1.5rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+      .badge-shield { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; font-size: 0.75rem; padding: 4px 10px; border-radius: 999px; }
+      .title-group p { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
+      
+      .actions { display: flex; gap: 10px; }
+      .btn { padding: 9px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; text-decoration: none; border: 1px solid var(--border); transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+      .btn-primary { background: var(--primary); color: white; border: none; }
+      .btn-primary:hover { filter: brightness(1.1); }
+      .btn-secondary { background: var(--surface); color: var(--text); }
+      .btn-secondary:hover { background: var(--surface-card); }
+      
+      .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+      .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+      .kpi-label { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; }
+      .kpi-value { font-size: 1.8rem; font-weight: 700; margin-top: 6px; }
+      .kpi-value.danger { color: var(--danger); }
+      .kpi-value.success { color: var(--success); }
+      
+      .filter-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; margin-bottom: 20px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+      .filter-input { flex: 1; min-width: 220px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 0.85rem; outline: none; }
+      .filter-select { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 0.85rem; outline: none; }
+      .checkbox-label { font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+      
+      .table-wrapper { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+      th { text-align: left; padding: 12px 16px; background: rgba(0, 0, 0, 0.25); color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+      td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      tr:last-child td { border-bottom: none; }
+      tr.flagged-row { background: rgba(239, 68, 68, 0.06); }
+      
+      .tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; }
+      .tag-msg { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+      .tag-join { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; }
+      .tag-leave { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; }
+      .tag-flag { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); font-weight: 700; }
+      
+      .user-meta { display: flex; flex-direction: column; gap: 2px; }
+      .user-name { font-weight: 600; color: var(--text); }
+      .user-ip { font-size: 0.72rem; color: var(--text-muted); font-family: monospace; }
+      .message-body { font-size: 0.88rem; color: #e2e8f0; line-height: 1.4; word-break: break-word; }
+      .time-col { white-space: nowrap; font-size: 0.75rem; color: var(--text-muted); }
+      
+      .auth-modal { max-width: 380px; margin: 100px auto; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; text-align: center; }
+      .auth-modal input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); margin: 16px 0; outline: none; }
+  body
+    if !authorized
+      div.auth-modal
+        h2 Admin Access Required
+        p(style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px;") Enter the admin security key to inspect audit logs.
+        form(method="GET", action="/admin/audit")
+          input(type="password", name="key", placeholder="Enter Admin Key (Default: audit2026)", autofocus, required)
+          button.btn.btn-primary(type="submit", style="width: 100%; justify-content: center;") Authenticate
+    else
+      div.container
+        div.header
+          div.title-group
+            h1
+              span 🛡️ Audit & Moderation Console
+              span.badge-shield Compliance Active
+            p Real-time tamper-evident audit trail of all messages, user sessions, and client IPs.
+          div.actions
+            a.btn.btn-secondary(href="/admin/audit?key=" + key) 🔄 Refresh
+            a.btn.btn-primary(href="/admin/export-logs?key=" + key, target="_blank") 📥 Export .JSONL
+            a.btn.btn-secondary(href="/chat", target="_blank") 💬 Open Chat
+
+        div.kpi-row
+          div.kpi-card
+            div.kpi-label Total Logged Events
+            div.kpi-value= stats.totalEvents
+          div.kpi-card
+            div.kpi-label Flagged Violations
+            div.kpi-value(class=stats.flaggedCount > 0 ? 'danger' : 'success')= stats.flaggedCount
+          div.kpi-card
+            div.kpi-label Active Online Users
+            div.kpi-value.success= stats.onlineUsers
+
+        div.filter-bar
+          input#searchBox.filter-input(type="text", placeholder="Search by username, IP, or message contents...", onkeyup="filterRows()")
+          select#typeFilter.filter-select(onchange="filterRows()")
+            option(value="ALL") All Event Types
+            option(value="MESSAGE") Messages Only
+            option(value="USER_JOIN") User Joins
+            option(value="USER_LEAVE") User Disconnects
+          label.checkbox-label
+            input#flaggedOnly(type="checkbox", onchange="filterRows()")
+            span Show Flagged Violations Only (⚠️)
+
+        div.table-wrapper
+          table
+            thead
+              tr
+                th Time (UTC / Local)
+                th Event Type
+                th Sender / Origin IP
+                th Recipient
+                th Message Content
+                th Violation Flags
+            tbody#logsTbody
+              each log in logs
+                tr(class=log.isFlagged ? 'flagged-row' : '', data-sender=(log.sender || '').toLowerCase(), data-message=(log.message || '').toLowerCase(), data-ip=(log.ip || '').toLowerCase(), data-type=log.eventType, data-flagged=log.isFlagged ? 'true' : 'false')
+                  td.time-col
+                    div= new Date(log.timestamp).toLocaleTimeString()
+                    div(style="font-size: 0.68rem; color: #64748b;")= new Date(log.timestamp).toISOString().split('T')[0]
+                  td
+                    if log.eventType === 'MESSAGE'
+                      span.tag.tag-msg MESSAGE
+                    else if log.eventType === 'USER_JOIN'
+                      span.tag.tag-join JOIN
+                    else if log.eventType === 'USER_LEAVE'
+                      span.tag.tag-leave LEAVE
+                    else
+                      span.tag= log.eventType
+                  td
+                    div.user-meta
+                      span.user-name= log.sender || 'Anonymous'
+                      span.user-ip 🌐 #{log.ip}
+                  td
+                    if log.target === 'All'
+                      span(style="color: #94a3b8;") # Global Room
+                    else if log.target === 'System'
+                      span(style="color: #64748b;") System Event
+                    else
+                      span(style="color: #d8b4fe; font-weight: 600;") 🔒 @#{log.target}
+                  td
+                    div.message-body= log.message
+                  td
+                    if log.isFlagged
+                      each flag in (log.flags || [])
+                        span.tag.tag-flag ⚠️ #{flag}
+                    else
+                      span(style="color: #64748b; font-size: 0.75rem;") Clean
+
+      script.
+        function filterRows() {
+          const search = document.getElementById('searchBox').value.toLowerCase();
+          const type = document.getElementById('typeFilter').value;
+          const flaggedOnly = document.getElementById('flaggedOnly').checked;
+
+          const rows = document.querySelectorAll('#logsTbody tr');
+          rows.forEach(row => {
+            const sender = row.getAttribute('data-sender') || '';
+            const message = row.getAttribute('data-message') || '';
+            const ip = row.getAttribute('data-ip') || '';
+            const rType = row.getAttribute('data-type') || '';
+            const isFlagged = row.getAttribute('data-flagged') === 'true';
+
+            const matchSearch = sender.includes(search) || message.includes(search) || ip.includes(search);
+            const matchType = (type === 'ALL' || rType === type);
+            const matchFlag = (!flaggedOnly || isFlagged);
+
+            if (matchSearch && matchType && matchFlag) {
+              row.style.display = '';
+            } else {
+              row.style.display = 'none';
+            }
+          });
+        }

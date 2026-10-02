@@ -1,12 +1,14 @@
 /**
- * PulseChat Production Server
+ * PulseChat Production Server with Comprehensive Audit & Moderation Logging
  */
 
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const morgan = require('morgan');
+const fs = require('fs');
 const { Server } = require('socket.io');
+const { logEvent, analyzeViolation, getClientIp, getLogs, AUDIT_FILE } = require('./logger');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,6 +23,8 @@ const io = new Server(server, {
 
 // App configuration
 const port = process.env.PORT || 3000;
+const ADMIN_SECRET = process.env.ADMIN_KEY || 'audit2026';
+
 app.set('port', port);
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'pug');
@@ -33,7 +37,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0
 }));
 
-// Basic HTML sanitization helper
+// Basic HTML sanitization helper for client-rendered messages
 function escapeHtml(text) {
   if (typeof text !== 'string') return '';
   return text
@@ -44,7 +48,14 @@ function escapeHtml(text) {
     .replace(/'/g, '&#039;');
 }
 
-// Routes
+// In-memory state tracking for active connections
+const clients = {};          // { [userName]: socketId }
+const socketsOfClients = {}; // { [socketId]: userName }
+
+// ============================================================================
+// Web Routes
+// ============================================================================
+
 app.get('/', (req, res) => {
   res.redirect('/chat');
 });
@@ -63,18 +74,70 @@ app.get('/health', (req, res) => {
   });
 });
 
-// In-memory state tracking
-const clients = {};          // { [userName]: socketId }
-const socketsOfClients = {}; // { [socketId]: userName }
+// Admin Audit & Compliance Console
+app.get('/admin/audit', (req, res) => {
+  const reqKey = req.query.key;
+  const isAuthorized = (reqKey === ADMIN_SECRET);
+
+  if (!isAuthorized) {
+    return res.render('admin_audit', { authorized: false, key: '' });
+  }
+
+  const logs = getLogs({ limit: 300 });
+  const totalEvents = logs.length;
+  const flaggedCount = logs.filter(l => l.isFlagged).length;
+  const onlineUsers = Object.keys(clients).length;
+
+  res.render('admin_audit', {
+    authorized: true,
+    key: reqKey,
+    logs: logs,
+    stats: {
+      totalEvents,
+      flaggedCount,
+      onlineUsers
+    }
+  });
+});
+
+// Admin Export Logs (Download raw .jsonl audit file)
+app.get('/admin/export-logs', (req, res) => {
+  const reqKey = req.query.key;
+  if (reqKey !== ADMIN_SECRET) {
+    return res.status(403).send('Unauthorized. Provide valid ?key= parameter.');
+  }
+
+  if (fs.existsSync(AUDIT_FILE)) {
+    res.download(AUDIT_FILE, `chat_audit_${new Date().toISOString().split('T')[0]}.jsonl`);
+  } else {
+    res.status(404).send('No logs recorded yet.');
+  }
+});
+
+// Admin JSON API (for external dashboards or automated monitoring tools)
+app.get('/api/admin/audit-logs', (req, res) => {
+  const reqKey = req.query.key || req.headers['x-admin-key'];
+  if (reqKey !== ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+
+  const logs = getLogs(req.query);
+  res.json({ count: logs.length, logs });
+});
+
+// ============================================================================
+// Socket.io Realtime Events with Audit Trail
+// ============================================================================
 
 io.on('connection', (socket) => {
-  console.log(`[Socket Connected] id=${socket.id}`);
+  const clientIp = getClientIp(socket);
+  const userAgent = socket.handshake.headers['user-agent'] || 'unknown';
 
   // Handle setting username
   socket.on('set username', (rawName) => {
     const userName = (rawName || '').trim();
     
-    // Validation: 1-24 characters, alphanumeric and basic symbols
+    // Validation
     if (!userName || userName.length > 24) {
       socket.emit('userNameError', { message: 'Username must be between 1 and 24 characters.' });
       return;
@@ -85,26 +148,38 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Check if name is taken by another client
+    // Check if name is already taken
     const existingSocketId = clients[userName];
     if (existingSocketId && existingSocketId !== socket.id) {
       socket.emit('userNameError', { message: `Username "${userName}" is already taken.` });
       return;
     }
 
-    // Success: register user
+    // Register active user
     clients[userName] = socket.id;
     socketsOfClients[socket.id] = userName;
 
-    // Send welcome packet to the user
+    // AUDIT LOG: Record user registration with IP and User-Agent
+    logEvent({
+      eventType: 'USER_JOIN',
+      ip: clientIp,
+      userAgent: userAgent,
+      socketId: socket.id,
+      sender: userName,
+      target: 'Global Room',
+      message: `${userName} entered the room`,
+      isFlagged: false,
+      flags: []
+    });
+
+    // Welcome packet to the user
     socket.emit('welcome', {
       userName: userName,
       currentUsers: JSON.stringify(Object.keys(clients))
     });
 
-    // Notify all other users
+    // Notify all other clients
     socket.broadcast.emit('userJoined', { userName: userName });
-    console.log(`[User Registered] ${userName} (${socket.id})`);
   });
 
   // Handle messages
@@ -117,10 +192,29 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const cleanMessage = escapeHtml(msg.message.trim());
-    if (!cleanMessage) return;
+    const rawMessage = msg.message.trim();
+    if (!rawMessage) return;
 
+    // Analyze message for potential violations (slurs, spam, suspicious links, phishing)
+    const violationAnalysis = analyzeViolation(rawMessage);
+
+    // AUDIT LOG: Record message audit entry with IP, recipient, and violation tags
+    logEvent({
+      eventType: 'MESSAGE',
+      ip: clientIp,
+      userAgent: userAgent,
+      socketId: socket.id,
+      sender: sender,
+      target: msg.target || 'All',
+      message: rawMessage, // Preserves exact raw text for legal/moderation evidence
+      isFlagged: violationAnalysis.isFlagged,
+      flags: violationAnalysis.flags
+    });
+
+    // Sanitize for browser presentation
+    const cleanMessage = escapeHtml(rawMessage);
     const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
     const payload = {
       source: sender,
       message: cleanMessage,
@@ -137,7 +231,7 @@ io.on('connection', (socket) => {
       if (targetSocketId) {
         // Send to target
         io.to(targetSocketId).emit('message', payload);
-        // Also send echo back to sender if distinct
+        // Echo back to sender
         if (targetSocketId !== socket.id) {
           socket.emit('message', payload);
         }
@@ -169,14 +263,29 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const userName = socketsOfClients[socket.id];
     delete socketsOfClients[socket.id];
+    
     if (userName) {
       delete clients[userName];
+      
+      // AUDIT LOG: Record disconnect event
+      logEvent({
+        eventType: 'USER_LEAVE',
+        ip: clientIp,
+        userAgent: userAgent,
+        socketId: socket.id,
+        sender: userName,
+        target: 'Global Room',
+        message: `${userName} disconnected`,
+        isFlagged: false,
+        flags: []
+      });
+
       io.emit('userLeft', { userName: userName });
-      console.log(`[User Left] ${userName}`);
     }
   });
 });
 
 server.listen(port, () => {
-  console.log(`PulseChat server listening on port ${port} (http://localhost:${port})`);
+  console.log(`PulseChat listening on port ${port} (http://localhost:${port})`);
+  console.log(`Audit Console: http://localhost:${port}/admin/audit?key=${ADMIN_SECRET}`);
 });
