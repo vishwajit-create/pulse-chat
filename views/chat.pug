@@ -1,0 +1,158 @@
+extends layout
+
+block append head
+  script(src="/socket.io/socket.io.js")
+  script(src="/javascripts/jquery/jquery-1.7.min.js")
+  script(src="/javascripts/chat.js")
+
+block content
+  //- Join Screen Modal
+  div#joinModal.join-modal-wrapper
+    div.join-card
+      div.brand-badge
+        div.logo-icon
+          svg(width="28", height="28", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2", stroke-linecap="round", stroke-linejoin="round")
+            path(d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z")
+        h2 PulseChat
+      h1 Welcome to the Room
+      p Connect instantly, chat publicly in Global Chat, or send private direct messages to online users.
+      
+      div.form-group
+        label(for="userName") Choose Your Display Name
+        div.input-with-icon
+          span.icon
+            svg(width="18", height="18", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2", stroke-linecap="round", stroke-linejoin="round")
+              path(d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2")
+              circle(cx="12", cy="7", r="4")
+          input#userName(type="text", placeholder="e.g. Alex, Maya, Jordan", autocomplete="off", maxlength="24")
+        div#feedback.feedback-message
+
+      button#btnJoin.btn-primary(type="button")
+        span Enter Chat Room
+        svg(width="18", height="18", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2", stroke-linecap="round", stroke-linejoin="round")
+          line(x1="5", y1="12", x2="19", y2="12")
+          polyline(points="12 5 19 12 12 19")
+
+      div.features-row
+        div.feature-item
+          span.dot.green
+          span Real-time Socket.io
+        div.feature-item
+          span.dot.blue
+          span 1-on-1 Direct Messaging
+        div.feature-item
+          span.dot.purple
+          span No Signup Required
+
+  //- Main Application Shell (hidden until username chosen)
+  div#appShell.app-shell.hidden
+    div#sidebarOverlay.sidebar-overlay
+
+    //- Left Sidebar
+    aside#sidebar.sidebar
+      div.sidebar-header
+        div.brand
+          div.logo-icon.small
+            svg(width="20", height="20", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2", stroke-linecap="round", stroke-linejoin="round")
+              path(d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z")
+          span.brand-title PulseChat
+        button#btnCloseSidebar.btn-icon.mobile-only(type="button", aria-label="Close menu")
+          svg(width="20", height="20", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2")
+            line(x1="18", y1="6", x2="6", y2="18")
+            line(x1="6", y1="6", x2="18", y2="18")
+
+      div.sidebar-scroll
+        div.section-label CHANNELS
+        ul.channels-list
+          li#chanGlobal.channel-item.active(data-target="All")
+            span.chan-icon #
+            span.chan-name Global Room
+            span#unreadGlobal.badge-unread.hidden 0
+
+        div.section-header
+          span.section-label ONLINE USERS
+          span#onlineCountBadge.count-pill 1
+
+        ul#usersList.users-list
+          //- Dynamically populated
+
+      div.sidebar-footer
+        div.user-profile
+          div#myAvatar.avatar-bubble ?
+          div.user-info
+            div#myDisplayTag.user-name You
+            div.user-status
+              span.status-dot.online
+              span.status-text Online
+        button#btnSoundToggle.btn-icon(type="button", title="Toggle sound")
+          svg#iconSoundOn(width="18", height="18", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2")
+            polygon(points="11 5 6 9 2 9 2 15 6 15 11 19 11 5")
+            path(d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07")
+          svg#iconSoundOff.hidden(width="18", height="18", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2")
+            polygon(points="11 5 6 9 2 9 2 15 6 15 11 19 11 5")
+            line(x1="23", y1="9", x2="17", y2="15")
+            line(x1="17", y1="9", x2="23", y2="15")
+
+    //- Main Chat Section
+    main#chatMain.chat-main
+      header#chatHeader.chat-header
+        div.header-left
+          button#btnOpenSidebar.btn-icon.mobile-only(type="button", aria-label="Open menu")
+            svg(width="22", height="22", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2")
+              line(x1="3", y1="12", x2="21", y2="12")
+              line(x1="3", y1="6", x2="21", y2="6")
+              line(x1="3", y1="18", x2="21", y2="18")
+          div.target-details
+            div.target-title-row
+              span#targetIcon.target-type-icon #
+              h2#targetTitle Global Room
+              span#targetBadge.target-pill Public
+            p#targetSubtitle.target-subtitle Messages are visible to all connected users
+
+        div.header-right
+          div.online-indicator
+            span.status-dot.online
+            span#headerOnlineText 1 Online
+
+      //- Message stream
+      div#msgWindow.msg-window
+        div.chat-welcome-banner
+          div.welcome-icon 💬
+          h3 Welcome to Global Room
+          p Say hello! Send a message below to broadcast to everyone, or click a user in the sidebar to chat privately.
+
+      //- Typing indicator
+      div#typingIndicator.typing-indicator.hidden
+        span.dots
+          span
+          span
+          span
+        span#typingUserText Someone is typing...
+
+      //- Input area
+      div.chat-input-container
+        //- Private chat warning/switcher chip
+        div#privateBanner.private-banner.hidden
+          div.private-info
+            svg(width="14", height="14", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2")
+              rect(x="3", y="11", width="18", height="11", rx="2", ry="2")
+              path(d="M7 11V7a5 5 0 0 1 10 0v4")
+            span Private messaging with <strong id="privateTargetName">User</strong>
+          button#btnCancelPrivate.btn-text(type="button") Switch to Global Chat ✕
+
+        //- Quick reactions
+        div.quick-reactions
+          span.reactions-label Reactions:
+          button.btn-emoji(type="button", data-emoji="😀") 😀
+          button.btn-emoji(type="button", data-emoji="❤️") ❤️
+          button.btn-emoji(type="button", data-emoji="👍") 👍
+          button.btn-emoji(type="button", data-emoji="🔥") 🔥
+          button.btn-emoji(type="button", data-emoji="🎉") 🎉
+          button.btn-emoji(type="button", data-emoji="🚀") 🚀
+
+        form#chatForm.chat-form(onsubmit="return false;")
+          input#msgInput(type="text", placeholder="Type a message... (Press Enter to send)", autocomplete="off", maxlength="2000")
+          button#btnSend.btn-send(type="submit", aria-label="Send message")
+            svg(width="18", height="18", viewBox="0 0 24 24", fill="none", stroke="currentColor", stroke-width="2")
+              line(x1="22", y1="2", x2="11", y2="13")
+              polygon(points="22 2 15 22 11 13 2 9 22 2")

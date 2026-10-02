@@ -1,0 +1,21 @@
+{
+  "name": "pulse-chat",
+  "version": "1.0.0",
+  "description": "Realtime multi-user web chat with public rooms and private direct messaging",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "pug": "^3.0.3",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}
