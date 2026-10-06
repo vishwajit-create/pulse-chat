@@ -13,13 +13,35 @@ const { logEvent, analyzeViolation, getClientIp, getLogs, AUDIT_FILE } = require
 const app = express();
 const server = http.createServer(app);
 
+// Immediate production safeguards against overload
+const MAX_CONNECTIONS = 2000;
+const MESSAGE_RATE_LIMIT = 5; // max messages per second
+const MESSAGE_RATE_WINDOW_MS = 1000;
+const messageRateMap = new Map();
+
+function enforceMessageRateLimit(key) {
+  const now = Date.now();
+  const timestamps = messageRateMap.get(key) || [];
+  const recent = timestamps.filter((ts) => now - ts < MESSAGE_RATE_WINDOW_MS);
+
+  if (recent.length >= MESSAGE_RATE_LIMIT) {
+    return false;
+  }
+
+  recent.push(now);
+  messageRateMap.set(key, recent);
+  return true;
+}
+
 // Modern Socket.io configuration with CORS and transports
 const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  maxHttpBufferSize: 1e6
 });
+server.maxConnections = MAX_CONNECTIONS;
 
 // App configuration
 const port = process.env.PORT || 3000;
@@ -31,8 +53,8 @@ app.set('view engine', 'pug');
 
 // Security & Parsing Middlewares
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0
 }));
@@ -133,11 +155,18 @@ io.on('connection', (socket) => {
   const clientIp = getClientIp(socket);
   const userAgent = socket.handshake.headers['user-agent'] || 'unknown';
 
+  if (Object.keys(clients).length >= MAX_CONNECTIONS) {
+    socket.emit('serverError', {
+      message: 'The server is currently full. Please try again in a few moments.'
+    });
+    socket.disconnect(true);
+    return;
+  }
+
   // Handle setting username
   socket.on('set username', (rawName) => {
     const userName = (rawName || '').trim();
-    
-    // Validation
+
     if (!userName || userName.length > 24) {
       socket.emit('userNameError', { message: 'Username must be between 1 and 24 characters.' });
       return;
@@ -152,6 +181,13 @@ io.on('connection', (socket) => {
     const existingSocketId = clients[userName];
     if (existingSocketId && existingSocketId !== socket.id) {
       socket.emit('userNameError', { message: `Username "${userName}" is already taken.` });
+      return;
+    }
+
+    // Check if server capacity was reached while waiting for username
+    if (Object.keys(clients).length >= MAX_CONNECTIONS) {
+      socket.emit('serverError', { message: 'The server is currently full. Please try again later.' });
+      socket.disconnect(true);
       return;
     }
 
@@ -185,7 +221,7 @@ io.on('connection', (socket) => {
   // Handle messages
   socket.on('message', (msg) => {
     if (!msg || typeof msg.message !== 'string') return;
-    
+
     const sender = socketsOfClients[socket.id];
     if (!sender) {
       socket.emit('userNameError', { message: 'Please select a username first.' });
@@ -194,6 +230,14 @@ io.on('connection', (socket) => {
 
     const rawMessage = msg.message.trim();
     if (!rawMessage) return;
+
+    const rateKey = `${sender}:${clientIp}`;
+    if (!enforceMessageRateLimit(rateKey)) {
+      socket.emit('messageError', {
+        message: 'Too many messages. Please slow down for a moment.'
+      });
+      return;
+    }
 
     // Analyze message for potential violations (slurs, spam, suspicious links, phishing)
     const violationAnalysis = analyzeViolation(rawMessage);
@@ -214,7 +258,7 @@ io.on('connection', (socket) => {
     // Sanitize for browser presentation
     const cleanMessage = escapeHtml(rawMessage);
     const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
+
     const payload = {
       source: sender,
       message: cleanMessage,
@@ -263,10 +307,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const userName = socketsOfClients[socket.id];
     delete socketsOfClients[socket.id];
-    
+
     if (userName) {
       delete clients[userName];
-      
+
       // AUDIT LOG: Record disconnect event
       logEvent({
         eventType: 'USER_LEAVE',
