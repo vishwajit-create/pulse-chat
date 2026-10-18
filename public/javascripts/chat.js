@@ -5,8 +5,10 @@
 const SUPABASE_URL = 'https://xsppndniabvdntvsivwm.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzcHBuZG5pYWJ2ZG50dnNpdndtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyOTgxODIsImV4cCI6MjEwNzg3NDE4Mn0.f3jQmV-feyZorkfD1ZWM3dsNBwV3oSjuKsNeGHm2ni4';
 
-// Initialize Supabase Client
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Initialize Supabase Client instance (avoid colliding with global 'supabase' from CDN)
+const sbClient = (window.supabase && window.supabase.createClient)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
 
 let realtimeChannel = null;
 let myUserName = null;
@@ -71,9 +73,10 @@ function analyzeViolation(text) {
 
 // Log audit record directly to Supabase Postgres
 async function logAuditEvent(entry) {
+  if (!sbClient) return;
   try {
     const analysis = analyzeViolation(entry.message || '');
-    await supabase.from('chat_audit_logs').insert([{
+    await sbClient.from('chat_audit_logs').insert([{
       event_type: entry.event_type,
       sender: entry.sender,
       target: entry.target || 'All',
@@ -265,96 +268,107 @@ async function submitJoin() {
     return;
   }
 
+  if (!sbClient) {
+    $('#feedback').addClass('error').text('Supabase client failed to load. Check internet connection.');
+    return;
+  }
+
   $('#btnJoin').prop('disabled', true);
   $('#feedback').removeClass('error').text('Connecting to Supabase Realtime...');
 
   myUserName = name;
 
-  // Initialize Realtime Channel with Broadcast & Presence
-  realtimeChannel = supabase.channel('room:pulse-global', {
-    config: {
-      broadcast: { self: true },
-      presence: { key: myUserName }
-    }
-  });
+  try {
+    // Initialize Realtime Channel with Broadcast & Presence
+    realtimeChannel = sbClient.channel('room:pulse-global', {
+      config: {
+        broadcast: { self: true },
+        presence: { key: myUserName }
+      }
+    });
 
-  // 1. Broadcast Message Listener
-  realtimeChannel.on('broadcast', { event: 'message' }, ({ payload }) => {
-    if (payload.target === 'All' || payload.target === myUserName || payload.source === myUserName) {
-      renderMessage(payload);
-    }
-  });
+    // 1. Broadcast Message Listener
+    realtimeChannel.on('broadcast', { event: 'message' }, ({ payload }) => {
+      if (payload.target === 'All' || payload.target === myUserName || payload.source === myUserName) {
+        renderMessage(payload);
+      }
+    });
 
-  // 2. Typing indicator listener
-  realtimeChannel.on('broadcast', { event: 'typing' }, ({ payload }) => {
-    if (payload.user === myUserName) return;
-    const shouldShow = (payload.target === 'All' && currentTarget === 'All') ||
-                       (payload.target === myUserName && currentTarget === payload.user);
-    if (shouldShow) {
-      $('#typingUserText').text(payload.user + ' is typing...');
-      $('#typingIndicator').removeClass('hidden');
-      clearTimeout(incomingTypingTimer);
-      incomingTypingTimer = setTimeout(() => {
+    // 2. Typing indicator listener
+    realtimeChannel.on('broadcast', { event: 'typing' }, ({ payload }) => {
+      if (payload.user === myUserName) return;
+      const shouldShow = (payload.target === 'All' && currentTarget === 'All') ||
+                         (payload.target === myUserName && currentTarget === payload.user);
+      if (shouldShow) {
+        $('#typingUserText').text(payload.user + ' is typing...');
+        $('#typingIndicator').removeClass('hidden');
+        clearTimeout(incomingTypingTimer);
+        incomingTypingTimer = setTimeout(() => {
+          $('#typingIndicator').addClass('hidden');
+        }, 3000);
+      }
+    });
+
+    realtimeChannel.on('broadcast', { event: 'stopTyping' }, ({ payload }) => {
+      if (payload.user !== myUserName) {
         $('#typingIndicator').addClass('hidden');
-      }, 3000);
-    }
-  });
+      }
+    });
 
-  realtimeChannel.on('broadcast', { event: 'stopTyping' }, ({ payload }) => {
-    if (payload.user !== myUserName) {
-      $('#typingIndicator').addClass('hidden');
-    }
-  });
+    // 3. Presence Sync Listener (Online Users)
+    realtimeChannel.on('presence', { event: 'sync' }, () => {
+      const state = realtimeChannel.presenceState();
+      const onlineUsers = Object.keys(state);
+      updateUsersList(onlineUsers);
+    });
 
-  // 3. Presence Sync Listener (Online Users)
-  realtimeChannel.on('presence', { event: 'sync' }, () => {
-    const state = realtimeChannel.presenceState();
-    const onlineUsers = Object.keys(state);
-    updateUsersList(onlineUsers);
-  });
+    realtimeChannel.on('presence', { event: 'join' }, ({ key }) => {
+      if (key !== myUserName) {
+        renderSystemMessage('✨ <strong>' + key + '</strong> joined');
+      }
+    });
 
-  realtimeChannel.on('presence', { event: 'join' }, ({ key }) => {
-    if (key !== myUserName) {
-      renderSystemMessage('✨ <strong>' + key + '</strong> joined');
-    }
-  });
+    realtimeChannel.on('presence', { event: 'leave' }, ({ key }) => {
+      renderSystemMessage('👋 <strong>' + key + '</strong> left');
+    });
 
-  realtimeChannel.on('presence', { event: 'leave' }, ({ key }) => {
-    renderSystemMessage('👋 <strong>' + key + '</strong> left');
-  });
+    // Subscribe to channel
+    realtimeChannel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        // Track presence
+        await realtimeChannel.track({
+          user: myUserName,
+          onlineAt: new Date().toISOString()
+        });
 
-  // Subscribe to channel
-  realtimeChannel.subscribe(async (status) => {
-    if (status === 'SUBSCRIBED') {
-      // Track presence
-      await realtimeChannel.track({
-        user: myUserName,
-        onlineAt: new Date().toISOString()
-      });
+        // Audit Log
+        logAuditEvent({
+          event_type: 'USER_JOIN',
+          sender: myUserName,
+          target: 'Global Room',
+          message: `${myUserName} entered the room`
+        });
 
-      // Audit Log
-      logAuditEvent({
-        event_type: 'USER_JOIN',
-        sender: myUserName,
-        target: 'Global Room',
-        message: `${myUserName} entered the room`
-      });
+        // Show Main UI
+        $('#myAvatar')
+          .css('background', getAvatarStyle(myUserName))
+          .text(myUserName.charAt(0).toUpperCase());
+        $('#myDisplayTag').text(myUserName);
 
-      // Show Main UI
-      $('#myAvatar')
-        .css('background', getAvatarStyle(myUserName))
-        .text(myUserName.charAt(0).toUpperCase());
-      $('#myDisplayTag').text(myUserName);
-
-      $('#joinModal').fadeOut(250, () => {
-        $('#appShell').removeClass('hidden');
-        $('#msgInput').focus();
-      });
-    } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-      $('#btnJoin').prop('disabled', false);
-      $('#feedback').addClass('error').text('Connection error. Please try again.');
-    }
-  });
+        $('#joinModal').fadeOut(250, () => {
+          $('#appShell').removeClass('hidden');
+          $('#msgInput').focus();
+        });
+      } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        $('#btnJoin').prop('disabled', false);
+        $('#feedback').addClass('error').text('Connection error (' + status + '). Please try again.');
+      }
+    });
+  } catch (err) {
+    console.error('Join error:', err);
+    $('#btnJoin').prop('disabled', false);
+    $('#feedback').addClass('error').text('Error: ' + (err.message || 'Failed to connect.'));
+  }
 }
 
 function submitMessage() {

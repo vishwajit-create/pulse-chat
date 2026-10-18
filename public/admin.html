@@ -153,7 +153,7 @@
     const EXPECTED_KEY = 'a582bada4cc1da841b5a851cba3e1809';
     const SUPABASE_URL = 'https://xsppndniabvdntvsivwm.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzcHBuZG5pYWJ2ZG50dnNpdndtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyOTgxODIsImV4cCI6MjEwNzg3NDE4Mn0.f3jQmV-feyZorkfD1ZWM3dsNBwV3oSjuKsNeGHm2ni4';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     let allLogs = [];
 
@@ -183,7 +183,7 @@
 
     async function fetchLogs() {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await sbClient
           .from('chat_audit_logs')
           .select('*')
           .order('created_at', { ascending: false })
