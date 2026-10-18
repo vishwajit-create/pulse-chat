@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/chat", "destination": "/index.html" },
+    { "source": "/admin/audit", "destination": "/admin.html" },
+    { "source": "/health", "destination": "/api/health.js" }
+  ]
+}

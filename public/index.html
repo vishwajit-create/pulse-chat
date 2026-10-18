@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0b0f19">
+  <title>PulseChat - Serverless Realtime Messaging</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/stylesheets/chat.css">
+  
+  <!-- Supabase & jQuery -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+</head>
+<body>
+  <!-- Join Screen Modal -->
+  <div id="joinModal" class="join-modal-wrapper">
+    <div class="join-card">
+      <div class="brand-badge">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"></path>
+          </svg>
+        </div>
+        <h2>PulseChat</h2>
+      </div>
+      <h1>Welcome to the Room</h1>
+      <p>Connect instantly, chat publicly in Global Chat, or send private direct messages to online users.</p>
+      
+      <div class="form-group">
+        <label for="userName">Choose Your Display Name</label>
+        <div class="input-with-icon">
+          <span class="icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </span>
+          <input id="userName" type="text" placeholder="e.g. Alex, Maya, Jordan" autocomplete="off" maxlength="24">
+        </div>
+        <div id="feedback" class="feedback-message"></div>
+      </div>
+
+      <button id="btnJoin" class="btn-primary" type="button">
+        <span>Enter Chat Room</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+          <polyline points="12 5 19 12 12 19"></polyline>
+        </svg>
+      </button>
+
+      <div class="features-row">
+        <div class="feature-item">
+          <span class="dot green"></span>
+          <span>Supabase Realtime Engine (Vercel-ready)</span>
+        </div>
+        <div class="feature-item">
+          <span class="dot blue"></span>
+          <span>1-on-1 Direct Messaging & Presence</span>
+        </div>
+        <div class="feature-item">
+          <span class="dot purple"></span>
+          <span>Automated Compliance Audit Logging</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Application Shell (hidden until username chosen) -->
+  <div id="appShell" class="app-shell hidden">
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+    <!-- Left Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="logo-icon small">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"></path>
+            </svg>
+          </div>
+          <span class="brand-title">PulseChat</span>
+        </div>
+        <button id="btnCloseSidebar" class="btn-icon mobile-only" type="button" aria-label="Close menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="sidebar-scroll">
+        <div class="section-label">CHANNELS</div>
+        <ul class="channels-list">
+          <li id="chanGlobal" class="channel-item active" data-target="All">
+            <span class="chan-icon">#</span>
+            <span class="chan-name">Global Room</span>
+          </li>
+        </ul>
+
+        <div class="section-header">
+          <span class="section-label">ONLINE USERS</span>
+          <span id="onlineCountBadge" class="count-pill">1</span>
+        </div>
+
+        <ul id="usersList" class="users-list">
+          <!-- Dynamically populated via Supabase Presence -->
+        </ul>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <div id="myAvatar" class="avatar-bubble">?</div>
+          <div class="user-info">
+            <div id="myDisplayTag" class="user-name">You</div>
+            <div class="user-status">
+              <span class="status-dot online"></span>
+              <span class="status-text">Online</span>
+            </div>
+          </div>
+        </div>
+        <button id="btnSoundToggle" class="btn-icon" type="button" title="Toggle sound">
+          <svg id="iconSoundOn" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+          <svg id="iconSoundOff" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <line x1="23" y1="9" x2="17" y2="15"></line>
+            <line x1="17" y1="9" x2="23" y2="15"></line>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Chat Section -->
+    <main id="chatMain" class="chat-main">
+      <header id="chatHeader" class="chat-header">
+        <div class="header-left">
+          <button id="btnOpenSidebar" class="btn-icon mobile-only" type="button" aria-label="Open menu">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+          <div class="target-details">
+            <div class="target-title-row">
+              <span id="targetIcon" class="target-type-icon">#</span>
+              <h2 id="targetTitle">Global Room</h2>
+              <span id="targetBadge" class="target-pill">Public</span>
+            </div>
+            <p id="targetSubtitle" class="target-subtitle">Messages are visible to all connected users</p>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <div class="online-indicator">
+            <span class="status-dot online"></span>
+            <span id="headerOnlineText">1 Online</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Message stream -->
+      <div id="msgWindow" class="msg-window">
+        <div class="chat-welcome-banner">
+          <div class="welcome-icon">💬</div>
+          <h3>Welcome to Global Room</h3>
+          <p>Say hello! Send a message below to broadcast to everyone, or click a user in the sidebar to chat privately.</p>
+        </div>
+      </div>
+
+      <!-- Typing indicator -->
+      <div id="typingIndicator" class="typing-indicator hidden">
+        <span class="dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+        <span id="typingUserText">Someone is typing...</span>
+      </div>
+
+      <!-- Input area -->
+      <div class="chat-input-container">
+        <!-- Private chat warning/switcher chip -->
+        <div id="privateBanner" class="private-banner hidden">
+          <div class="private-info">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <span>Private messaging with <strong id="privateTargetName">User</strong></span>
+          </div>
+          <button id="btnCancelPrivate" class="btn-text" type="button">Switch to Global Chat ✕</button>
+        </div>
+
+        <!-- Quick reactions -->
+        <div class="quick-reactions">
+          <span class="reactions-label">Reactions:</span>
+          <button class="btn-emoji" type="button" data-emoji="😀">😀</button>
+          <button class="btn-emoji" type="button" data-emoji="❤️">❤️</button>
+          <button class="btn-emoji" type="button" data-emoji="👍">👍</button>
+          <button class="btn-emoji" type="button" data-emoji="🔥">🔥</button>
+          <button class="btn-emoji" type="button" data-emoji="🎉">🎉</button>
+          <button class="btn-emoji" type="button" data-emoji="🚀">🚀</button>
+        </div>
+
+        <form id="chatForm" class="chat-form" onsubmit="return false;">
+          <input id="msgInput" type="text" placeholder="Type a message... (Press Enter to send)" autocomplete="off" maxlength="2000">
+          <button id="btnSend" class="btn-send" type="submit" aria-label="Send message">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script src="/javascripts/chat.js"></script>
+</body>
+</html>

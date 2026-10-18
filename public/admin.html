@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PulseChat - Compliance & Audit Console (Supabase)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --surface: #111827;
+      --surface-card: #1f2937;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #6366f1;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --success: #10b981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; min-height: 100vh; }
+    .container { max-width: 1280px; margin: 0 auto; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; }
+    .title-group h1 { font-size: 1.5rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .badge-shield { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; font-size: 0.75rem; padding: 4px 10px; border-radius: 999px; }
+    .title-group p { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
+    
+    .actions { display: flex; gap: 10px; }
+    .btn { padding: 9px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; text-decoration: none; border: 1px solid var(--border); transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+    .btn-primary { background: var(--primary); color: white; border: none; }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-secondary { background: var(--surface); color: var(--text); }
+    .btn-secondary:hover { background: var(--surface-card); }
+    
+    .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+    .kpi-label { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em; }
+    .kpi-value { font-size: 1.8rem; font-weight: 700; margin-top: 6px; }
+    .kpi-value.danger { color: var(--danger); }
+    .kpi-value.success { color: var(--success); }
+    
+    .filter-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; margin-bottom: 20px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+    .filter-input { flex: 1; min-width: 220px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 0.85rem; outline: none; }
+    .filter-select { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 0.85rem; outline: none; }
+    .checkbox-label { font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    
+    .table-wrapper { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th { text-align: left; padding: 12px 16px; background: rgba(0, 0, 0, 0.25); color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+    td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr.flagged-row { background: rgba(239, 68, 68, 0.06); }
+    
+    .tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; }
+    .tag-msg { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; }
+    .tag-join { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; }
+    .tag-leave { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; }
+    .tag-flag { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); font-weight: 700; }
+    
+    .user-meta { display: flex; flex-direction: column; gap: 2px; }
+    .user-name { font-weight: 600; color: var(--text); }
+    .user-ip { font-size: 0.72rem; color: var(--text-muted); font-family: monospace; }
+    .message-body { font-size: 0.88rem; color: #e2e8f0; line-height: 1.4; word-break: break-word; }
+    .time-col { white-space: nowrap; font-size: 0.75rem; color: var(--text-muted); }
+    
+    .auth-modal { max-width: 380px; margin: 100px auto; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; text-align: center; }
+    .auth-modal input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); margin: 16px 0; outline: none; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <!-- Auth Screen -->
+  <div id="authScreen" class="auth-modal">
+    <h2>Admin Access Required</h2>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 6px;">Enter your admin security key to inspect live Supabase audit logs.</p>
+    <form id="authForm" onsubmit="handleAuth(event)">
+      <input id="keyInput" type="password" placeholder="Enter Admin Key" autofocus required>
+      <button class="btn btn-primary" type="submit" style="width: 100%; justify-content: center;">Authenticate</button>
+      <div id="authError" style="color: var(--danger); font-size: 0.85rem; margin-top: 10px;" class="hidden">Invalid security key.</div>
+    </form>
+  </div>
+
+  <!-- Dashboard Container -->
+  <div id="dashboard" class="container hidden">
+    <div class="header">
+      <div class="title-group">
+        <h1>
+          <span>🛡️ Supabase Audit & Moderation Console</span>
+          <span class="badge-shield">Vercel & Supabase Active</span>
+        </h1>
+        <p>Real-time audit trail of all messages, user sessions, and violation flags.</p>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary" onclick="fetchLogs()">🔄 Refresh</button>
+        <button class="btn btn-primary" onclick="exportJSON()">📥 Export .JSON</button>
+        <a class="btn btn-secondary" href="/chat" target="_blank">💬 Open Chat</a>
+      </div>
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Logged Events</div>
+        <div id="kpiTotal" class="kpi-value">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Flagged Violations</div>
+        <div id="kpiFlagged" class="kpi-value success">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Unique Senders</div>
+        <div id="kpiUsers" class="kpi-value success">0</div>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <input id="searchBox" class="filter-input" type="text" placeholder="Search by username, IP, or message contents..." onkeyup="filterRows()">
+      <select id="typeFilter" class="filter-select" onchange="filterRows()">
+        <option value="ALL">All Event Types</option>
+        <option value="MESSAGE">Messages Only</option>
+        <option value="USER_JOIN">User Joins</option>
+        <option value="USER_LEAVE">User Disconnects</option>
+      </select>
+      <label class="checkbox-label">
+        <input id="flaggedOnly" type="checkbox" onchange="filterRows()">
+        <span>Show Flagged Violations Only (⚠️)</span>
+      </label>
+    </div>
+
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Time (UTC / Local)</th>
+            <th>Event Type</th>
+            <th>Sender</th>
+            <th>Recipient</th>
+            <th>Message Content</th>
+            <th>Violation Flags</th>
+          </tr>
+        </thead>
+        <tbody id="logsTbody">
+          <!-- Populated dynamically from Supabase Postgres -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const EXPECTED_KEY = 'a582bada4cc1da841b5a851cba3e1809';
+    const SUPABASE_URL = 'https://xsppndniabvdntvsivwm.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzcHBuZG5pYWJ2ZG50dnNpdndtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyOTgxODIsImV4cCI6MjEwNzg3NDE4Mn0.f3jQmV-feyZorkfD1ZWM3dsNBwV3oSjuKsNeGHm2ni4';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let allLogs = [];
+
+    function checkAuth() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const key = urlParams.get('key');
+      if (key === EXPECTED_KEY) {
+        showDashboard();
+      }
+    }
+
+    function handleAuth(e) {
+      e.preventDefault();
+      const entered = document.getElementById('keyInput').value.trim();
+      if (entered === EXPECTED_KEY) {
+        showDashboard();
+      } else {
+        document.getElementById('authError').classList.remove('hidden');
+      }
+    }
+
+    function showDashboard() {
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('dashboard').classList.remove('hidden');
+      fetchLogs();
+    }
+
+    async function fetchLogs() {
+      try {
+        const { data, error } = await supabase
+          .from('chat_audit_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(300);
+
+        if (error) throw error;
+        allLogs = data || [];
+        updateDashboard(allLogs);
+      } catch (err) {
+        console.error('Failed to load audit logs:', err);
+      }
+    }
+
+    function updateDashboard(logs) {
+      document.getElementById('kpiTotal').innerText = logs.length;
+      const flagged = logs.filter(l => l.is_flagged).length;
+      const kpiFlagged = document.getElementById('kpiFlagged');
+      kpiFlagged.innerText = flagged;
+      kpiFlagged.className = 'kpi-value ' + (flagged > 0 ? 'danger' : 'success');
+
+      const uniqueSenders = new Set(logs.map(l => l.sender)).size;
+      document.getElementById('kpiUsers').innerText = uniqueSenders;
+
+      renderTable(logs);
+    }
+
+    function renderTable(logs) {
+      const tbody = document.getElementById('logsTbody');
+      tbody.innerHTML = '';
+
+      logs.forEach(log => {
+        const tr = document.createElement('tr');
+        if (log.is_flagged) tr.className = 'flagged-row';
+        tr.setAttribute('data-sender', (log.sender || '').toLowerCase());
+        tr.setAttribute('data-message', (log.message || '').toLowerCase());
+        tr.setAttribute('data-type', log.event_type || '');
+        tr.setAttribute('data-flagged', log.is_flagged ? 'true' : 'false');
+
+        const d = new Date(log.created_at);
+        const timeHtml = `<div>${d.toLocaleTimeString()}</div><div style="font-size: 0.68rem; color: #64748b;">${d.toISOString().split('T')[0]}</div>`;
+        
+        let typeBadge = '';
+        if (log.event_type === 'MESSAGE') typeBadge = '<span class="tag tag-msg">MESSAGE</span>';
+        else if (log.event_type === 'USER_JOIN') typeBadge = '<span class="tag tag-join">JOIN</span>';
+        else if (log.event_type === 'USER_LEAVE') typeBadge = '<span class="tag tag-leave">LEAVE</span>';
+        else typeBadge = `<span class="tag">${log.event_type}</span>`;
+
+        let targetHtml = '';
+        if (log.target === 'All' || log.target === 'Global Room') targetHtml = '<span style="color: #94a3b8;"># Global Room</span>';
+        else targetHtml = `<span style="color: #d8b4fe; font-weight: 600;">🔒 @${log.target}</span>`;
+
+        let flagsHtml = '<span style="color: #64748b; font-size: 0.75rem;">Clean</span>';
+        if (log.is_flagged && log.flags && log.flags.length) {
+          flagsHtml = log.flags.map(f => `<span class="tag tag-flag">⚠️ ${f}</span>`).join(' ');
+        }
+
+        tr.innerHTML = `
+          <td class="time-col">${timeHtml}</td>
+          <td>${typeBadge}</td>
+          <td>
+            <div class="user-meta">
+              <span class="user-name">${log.sender || 'Anonymous'}</span>
+            </div>
+          </td>
+          <td>${targetHtml}</td>
+          <td><div class="message-body">${log.message || ''}</div></td>
+          <td>${flagsHtml}</td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterRows() {
+      const search = document.getElementById('searchBox').value.toLowerCase();
+      const type = document.getElementById('typeFilter').value;
+      const flaggedOnly = document.getElementById('flaggedOnly').checked;
+
+      const rows = document.querySelectorAll('#logsTbody tr');
+      rows.forEach(row => {
+        const sender = row.getAttribute('data-sender') || '';
+        const message = row.getAttribute('data-message') || '';
+        const rType = row.getAttribute('data-type') || '';
+        const isFlagged = row.getAttribute('data-flagged') === 'true';
+
+        const matchSearch = sender.includes(search) || message.includes(search);
+        const matchType = (type === 'ALL' || rType === type);
+        const matchFlag = (!flaggedOnly || isFlagged);
+
+        row.style.display = (matchSearch && matchType && matchFlag) ? '' : 'none';
+      });
+    }
+
+    function exportJSON() {
+      const blob = new Blob([JSON.stringify(allLogs, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `supabase_audit_logs_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+    }
+
+    checkAuth();
+  </script>
+</body>
+</html>

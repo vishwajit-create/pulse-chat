@@ -1,16 +1,23 @@
 /**
- * PulseChat Client Application
+ * PulseChat Client with Supabase Realtime (Serverless Vercel-ready)
  */
 
-var socket = null;
-var myUserName = null;
-var currentTarget = 'All'; // 'All' or specific username
-var soundEnabled = true;
-var typingTimer = null;
-var isCurrentlyTyping = false;
+const SUPABASE_URL = 'https://xsppndniabvdntvsivwm.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzcHBuZG5pYWJ2ZG50dnNpdndtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyOTgxODIsImV4cCI6MjEwNzg3NDE4Mn0.f3jQmV-feyZorkfD1ZWM3dsNBwV3oSjuKsNeGHm2ni4';
 
-// Avatar gradient palettes
-var AVATAR_COLORS = [
+// Initialize Supabase Client
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let realtimeChannel = null;
+let myUserName = null;
+let currentTarget = 'All';
+let soundEnabled = true;
+let isCurrentlyTyping = false;
+let typingTimer = null;
+let incomingTypingTimer = null;
+
+// Avatar palettes
+const AVATAR_COLORS = [
   'linear-gradient(135deg, #6366f1, #8b5cf6)',
   'linear-gradient(135deg, #06b6d4, #3b82f6)',
   'linear-gradient(135deg, #10b981, #059669)',
@@ -20,27 +27,79 @@ var AVATAR_COLORS = [
 ];
 
 function getAvatarStyle(name) {
-  var hash = 0;
-  for (var i = 0; i < (name || '').length; i++) {
+  let hash = 0;
+  for (let i = 0; i < (name || '').length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
-  var index = Math.abs(hash) % AVATAR_COLORS.length;
+  const index = Math.abs(hash) % AVATAR_COLORS.length;
   return AVATAR_COLORS[index];
 }
 
-// Subtle pleasant Web Audio chime
+// Client-side HTML escape for display
+function escapeHtml(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// Violation detector
+const SUSPICIOUS_PATTERNS = [
+  { name: 'DISCORD_OR_EXTERNAL_INVITE', regex: /(discord\.gg|t\.me|telegram\.me|bit\.ly)/i },
+  { name: 'SUSPECTED_PHISHING_LINK', regex: /(https?:\/\/[^\s]+)/i },
+  { name: 'REPEATED_CHAR_FLOOD', regex: /(.)\1{10,}/i }
+];
+const ABUSE_KEYWORDS = ['scam', 'hack', 'ddos', 'exploit', 'phish', 'kill', 'threat'];
+
+function analyzeViolation(text) {
+  const flags = [];
+  if (!text) return { isFlagged: false, flags };
+  const lower = text.toLowerCase();
+
+  for (const p of SUSPICIOUS_PATTERNS) {
+    if (p.regex.test(text)) flags.push(p.name);
+  }
+  for (const word of ABUSE_KEYWORDS) {
+    const r = new RegExp(`\\b${word}\\b`, 'i');
+    if (r.test(lower)) flags.push(`KEYWORD_${word.toUpperCase()}`);
+  }
+  return { isFlagged: flags.length > 0, flags };
+}
+
+// Log audit record directly to Supabase Postgres
+async function logAuditEvent(entry) {
+  try {
+    const analysis = analyzeViolation(entry.message || '');
+    await supabase.from('chat_audit_logs').insert([{
+      event_type: entry.event_type,
+      sender: entry.sender,
+      target: entry.target || 'All',
+      message: entry.message || '',
+      is_flagged: analysis.isFlagged,
+      flags: analysis.flags,
+      user_agent: navigator.userAgent
+    }]);
+  } catch (e) {
+    console.error('Audit log failed:', e);
+  }
+}
+
+// Web Audio Chime
 function playNotificationChime() {
   if (!soundEnabled) return;
   try {
-    var AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
-    var ctx = new AudioCtx();
-    var now = ctx.currentTime;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
     
-    var osc1 = ctx.createOscillator();
-    var gain1 = ctx.createGain();
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
     osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(587.33, now); // D5
+    osc1.frequency.setValueAtTime(587.33, now);
     gain1.gain.setValueAtTime(0.08, now);
     gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
     osc1.connect(gain1);
@@ -48,32 +107,28 @@ function playNotificationChime() {
     osc1.start(now);
     osc1.stop(now + 0.2);
 
-    var osc2 = ctx.createOscillator();
-    var gain2 = ctx.createGain();
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
     osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(880, now + 0.08); // A5
+    osc2.frequency.setValueAtTime(880, now + 0.08);
     gain2.gain.setValueAtTime(0.08, now + 0.08);
     gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
     osc2.connect(gain2);
     gain2.connect(ctx.destination);
     osc2.start(now + 0.08);
     osc2.stop(now + 0.35);
-  } catch(e) {
-    // audio context muted or unsupported
-  }
+  } catch(e) {}
 }
 
 function scrollToBottom() {
-  var win = $('#msgWindow');
+  const win = $('#msgWindow');
   if (win.length) {
     win.stop().animate({ scrollTop: win[0].scrollHeight }, 200);
   }
 }
 
-// Switch messaging recipient (All vs Direct Message)
 function setTarget(target) {
   currentTarget = target;
-
   if (target === 'All') {
     $('#targetIcon').text('#');
     $('#targetTitle').text('Global Room');
@@ -81,7 +136,6 @@ function setTarget(target) {
     $('#targetSubtitle').text('Messages are visible to all connected users');
     $('#privateBanner').addClass('hidden');
     $('#msgInput').attr('placeholder', 'Message #Global Room... (Press Enter to send)');
-    
     $('.channel-item').addClass('active');
     $('.user-item').removeClass('active');
   } else {
@@ -92,13 +146,10 @@ function setTarget(target) {
     $('#privateTargetName').text(target);
     $('#privateBanner').removeClass('hidden');
     $('#msgInput').attr('placeholder', 'Direct message @' + target + '... (Press Enter to send)');
-    
     $('.channel-item').removeClass('active');
     $('.user-item').removeClass('active');
     $('.user-item[data-username="' + target + '"]').addClass('active');
   }
-
-  // Close mobile sidebar if open
   closeMobileSidebar();
   $('#msgInput').focus();
 }
@@ -113,44 +164,38 @@ function openMobileSidebar() {
   $('#sidebarOverlay').addClass('active');
 }
 
-// Render message in conversation stream
 function renderMessage(msg) {
-  var isOutgoing = (msg.source === myUserName);
-  var isPrivate = (msg.target !== 'All');
-  var initial = (msg.source || '?').charAt(0).toUpperCase();
-  var avatarStyle = getAvatarStyle(msg.source);
-  var timeStr = msg.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const isOutgoing = (msg.source === myUserName);
+  const isPrivate = (msg.target !== 'All');
+  const initial = (msg.source || '?').charAt(0).toUpperCase();
+  const avatarStyle = getAvatarStyle(msg.source);
+  const timeStr = msg.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  var row = $('<div class="msg-row"></div>').addClass(isOutgoing ? 'outgoing' : 'incoming');
+  const row = $('<div class="msg-row"></div>').addClass(isOutgoing ? 'outgoing' : 'incoming');
 
-  // Avatar for incoming
   if (!isOutgoing) {
-    var avatar = $('<div class="avatar-bubble"></div>')
+    const avatar = $('<div class="avatar-bubble"></div>')
       .css('background', avatarStyle)
       .text(initial);
     row.append(avatar);
   }
 
-  var bubble = $('<div class="msg-bubble"></div>');
-
-  // Header info
-  var header = $('<div class="msg-header"></div>');
-  var sender = $('<span class="msg-sender"></span>').text(isOutgoing ? 'You' : msg.source);
+  const bubble = $('<div class="msg-bubble"></div>');
+  const header = $('<div class="msg-header"></div>');
+  const sender = $('<span class="msg-sender"></span>').text(isOutgoing ? 'You' : msg.source);
   header.append(sender);
 
   if (isPrivate) {
-    var privBadge = $('<span class="msg-badge-priv">🔒 Private</span>');
+    const privBadge = $('<span class="msg-badge-priv">🔒 Private</span>');
     header.append(privBadge);
   }
   bubble.append(header);
 
-  // Message body
-  var text = $('<div class="msg-text"></div>').html(msg.message);
+  const text = $('<div class="msg-text"></div>').html(escapeHtml(msg.message));
   bubble.append(text);
 
-  // Footer with time
-  var footer = $('<div class="msg-footer"></div>');
-  var timeSpan = $('<span></span>').text(timeStr);
+  const footer = $('<div class="msg-footer"></div>');
+  const timeSpan = $('<span></span>').text(timeStr);
   footer.append(timeSpan);
   bubble.append(footer);
 
@@ -163,222 +208,240 @@ function renderMessage(msg) {
   }
 }
 
-// System event pill ("Alice joined the room")
-function renderSystemMessage(text) {
-  var sys = $('<div class="msg-system"></div>').html(text);
+function renderSystemMessage(htmlText) {
+  const sys = $('<div class="msg-system"></div>').html(htmlText);
   $('#msgWindow').append(sys);
   scrollToBottom();
 }
 
-// Update the online user list
-function updateUsersList(users) {
-  var list = $('#usersList');
+function updateUsersList(onlineUsers) {
+  const list = $('#usersList');
   list.empty();
 
-  var otherCount = 0;
+  onlineUsers.forEach((uName) => {
+    if (uName === myUserName) return;
 
-  users.forEach(function(uName) {
-    if (uName === myUserName) return; // Don't list self as a contact
-    otherCount++;
+    const initial = uName.charAt(0).toUpperCase();
+    const avatarStyle = getAvatarStyle(uName);
+    const isActive = (currentTarget === uName);
 
-    var initial = uName.charAt(0).toUpperCase();
-    var avatarStyle = getAvatarStyle(uName);
-    var isActive = (currentTarget === uName);
-
-    var li = $('<li class="user-item"></li>')
+    const li = $('<li class="user-item"></li>')
       .attr('data-username', uName)
       .toggleClass('active', isActive);
 
-    var avatarWrap = $('<div class="avatar-wrapper"></div>');
-    var av = $('<div class="avatar-bubble"></div>')
+    const avatarWrap = $('<div class="avatar-wrapper"></div>');
+    const av = $('<div class="avatar-bubble"></div>')
       .css('background', avatarStyle)
       .text(initial);
-    var dot = $('<div class="status-dot-sm"></div>');
+    const dot = $('<div class="status-dot-sm"></div>');
     avatarWrap.append(av).append(dot);
 
-    var nameText = $('<span class="user-name-text"></span>').text(uName);
+    const nameText = $('<span class="user-name-text"></span>').text(uName);
     li.append(avatarWrap).append(nameText);
 
-    li.on('click', function() {
-      setTarget(uName);
-    });
-
+    li.on('click', () => setTarget(uName));
     list.append(li);
   });
 
-  var totalOnline = users.length;
-  $('#onlineCountBadge').text(totalOnline);
-  $('#headerOnlineText').text(totalOnline + (totalOnline === 1 ? ' User Online' : ' Users Online'));
+  const total = onlineUsers.length;
+  $('#onlineCountBadge').text(total);
+  $('#headerOnlineText').text(total + (total === 1 ? ' User Online' : ' Users Online'));
 
-  // If currently messaging someone who left, revert to All
-  if (currentTarget !== 'All' && users.indexOf(currentTarget) === -1) {
-    renderSystemMessage('<em>@' + currentTarget + ' left the conversation. Switched to Global Room.</em>');
+  if (currentTarget !== 'All' && !onlineUsers.includes(currentTarget)) {
+    renderSystemMessage('<em>@' + currentTarget + ' is offline. Switched to Global Room.</em>');
     setTarget('All');
   }
 }
 
-// Join the chat
-function submitJoin() {
-  var name = $('#userName').val().trim();
-  if (!name) {
-    $('#feedback').addClass('error').text('Please enter a display name.');
-    $('#userName').focus();
+// Join room via Supabase Realtime
+async function submitJoin() {
+  const name = $('#userName').val().trim();
+  if (!name || name.length > 24) {
+    $('#feedback').addClass('error').text('Username must be 1 to 24 characters.');
     return;
   }
-  $('#feedback').removeClass('error').text('Connecting...');
+  if (name.toLowerCase() === 'all') {
+    $('#feedback').addClass('error').text('"All" is reserved.');
+    return;
+  }
+
   $('#btnJoin').prop('disabled', true);
-  socket.emit('set username', name);
-}
+  $('#feedback').removeClass('error').text('Connecting to Supabase Realtime...');
 
-// Send current message
-function submitMessage() {
-  var text = $('#msgInput').val().trim();
-  if (!text) return;
+  myUserName = name;
 
-  socket.emit('message', {
-    message: text,
-    target: currentTarget
-  });
-
-  // Stop typing indicator immediately
-  if (isCurrentlyTyping) {
-    isCurrentlyTyping = false;
-    socket.emit('stopTyping');
-  }
-
-  $('#msgInput').val('');
-}
-
-// Handle typing emit
-function handleTypingKeystroke() {
-  if (!isCurrentlyTyping) {
-    isCurrentlyTyping = true;
-    socket.emit('typing', { target: currentTarget });
-  }
-  clearTimeout(typingTimer);
-  typingTimer = setTimeout(function() {
-    isCurrentlyTyping = false;
-    socket.emit('stopTyping');
-  }, 1200);
-}
-
-// Document Ready
-$(function() {
-  socket = io();
-
-  // Socket Events
-  socket.on('welcome', function(data) {
-    myUserName = data.userName;
-
-    // Setup self card
-    $('#myAvatar')
-      .css('background', getAvatarStyle(myUserName))
-      .text(myUserName.charAt(0).toUpperCase());
-    $('#myDisplayTag').text(myUserName);
-
-    // Transition from modal to main app
-    $('#joinModal').fadeOut(250, function() {
-      $('#appShell').removeClass('hidden');
-      $('#msgInput').focus();
-    });
-
-    try {
-      var currentList = JSON.parse(data.currentUsers || '[]');
-      updateUsersList(currentList);
-    } catch(e) {}
-  });
-
-  socket.on('userNameError', function(err) {
-    $('#btnJoin').prop('disabled', false);
-    $('#feedback').addClass('error').text(err.message || 'Username error occurred.');
-    $('#userName').focus();
-  });
-
-  socket.on('userJoined', function(data) {
-    renderSystemMessage('✨ <strong>' + data.userName + '</strong> joined the room');
-    // Refresh user list request
-    var existingUsers = [];
-    $('.user-item').each(function() {
-      existingUsers.push($(this).data('username'));
-    });
-    if (existingUsers.indexOf(data.userName) === -1) {
-      existingUsers.push(data.userName);
+  // Initialize Realtime Channel with Broadcast & Presence
+  realtimeChannel = supabase.channel('room:pulse-global', {
+    config: {
+      broadcast: { self: true },
+      presence: { key: myUserName }
     }
-    if (myUserName) existingUsers.push(myUserName);
-    updateUsersList(existingUsers);
   });
 
-  socket.on('userLeft', function(data) {
-    renderSystemMessage('👋 <strong>' + data.userName + '</strong> left');
-    var existingUsers = [];
-    $('.user-item').each(function() {
-      var u = $(this).data('username');
-      if (u !== data.userName) existingUsers.push(u);
-    });
-    if (myUserName) existingUsers.push(myUserName);
-    updateUsersList(existingUsers);
+  // 1. Broadcast Message Listener
+  realtimeChannel.on('broadcast', { event: 'message' }, ({ payload }) => {
+    if (payload.target === 'All' || payload.target === myUserName || payload.source === myUserName) {
+      renderMessage(payload);
+    }
   });
 
-  socket.on('message', function(msg) {
-    renderMessage(msg);
-  });
-
-  socket.on('messageError', function(err) {
-    renderSystemMessage('⚠️ ' + (err.message || 'Failed to deliver message.'));
-  });
-
-  var incomingTypingTimer = null;
-  socket.on('userTyping', function(data) {
-    if (data.userName === myUserName) return;
-    
-    // Show if public and we are in global, or if direct to us
-    var shouldShow = (data.target === 'All' && currentTarget === 'All') ||
-                     (data.target === myUserName && currentTarget === data.userName);
+  // 2. Typing indicator listener
+  realtimeChannel.on('broadcast', { event: 'typing' }, ({ payload }) => {
+    if (payload.user === myUserName) return;
+    const shouldShow = (payload.target === 'All' && currentTarget === 'All') ||
+                       (payload.target === myUserName && currentTarget === payload.user);
     if (shouldShow) {
-      $('#typingUserText').text(data.userName + ' is typing...');
+      $('#typingUserText').text(payload.user + ' is typing...');
       $('#typingIndicator').removeClass('hidden');
       clearTimeout(incomingTypingTimer);
-      incomingTypingTimer = setTimeout(function() {
+      incomingTypingTimer = setTimeout(() => {
         $('#typingIndicator').addClass('hidden');
       }, 3000);
     }
   });
 
-  socket.on('userStopTyping', function() {
-    $('#typingIndicator').addClass('hidden');
+  realtimeChannel.on('broadcast', { event: 'stopTyping' }, ({ payload }) => {
+    if (payload.user !== myUserName) {
+      $('#typingIndicator').addClass('hidden');
+    }
   });
 
-  // UI Listeners
+  // 3. Presence Sync Listener (Online Users)
+  realtimeChannel.on('presence', { event: 'sync' }, () => {
+    const state = realtimeChannel.presenceState();
+    const onlineUsers = Object.keys(state);
+    updateUsersList(onlineUsers);
+  });
+
+  realtimeChannel.on('presence', { event: 'join' }, ({ key }) => {
+    if (key !== myUserName) {
+      renderSystemMessage('✨ <strong>' + key + '</strong> joined');
+    }
+  });
+
+  realtimeChannel.on('presence', { event: 'leave' }, ({ key }) => {
+    renderSystemMessage('👋 <strong>' + key + '</strong> left');
+  });
+
+  // Subscribe to channel
+  realtimeChannel.subscribe(async (status) => {
+    if (status === 'SUBSCRIBED') {
+      // Track presence
+      await realtimeChannel.track({
+        user: myUserName,
+        onlineAt: new Date().toISOString()
+      });
+
+      // Audit Log
+      logAuditEvent({
+        event_type: 'USER_JOIN',
+        sender: myUserName,
+        target: 'Global Room',
+        message: `${myUserName} entered the room`
+      });
+
+      // Show Main UI
+      $('#myAvatar')
+        .css('background', getAvatarStyle(myUserName))
+        .text(myUserName.charAt(0).toUpperCase());
+      $('#myDisplayTag').text(myUserName);
+
+      $('#joinModal').fadeOut(250, () => {
+        $('#appShell').removeClass('hidden');
+        $('#msgInput').focus();
+      });
+    } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+      $('#btnJoin').prop('disabled', false);
+      $('#feedback').addClass('error').text('Connection error. Please try again.');
+    }
+  });
+}
+
+function submitMessage() {
+  const text = $('#msgInput').val().trim();
+  if (!text || !realtimeChannel) return;
+
+  const payload = {
+    source: myUserName,
+    message: text,
+    target: currentTarget,
+    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  };
+
+  // Broadcast to other users over Supabase Realtime
+  realtimeChannel.send({
+    type: 'broadcast',
+    event: 'message',
+    payload: payload
+  });
+
+  // Record audit log in Supabase Postgres
+  logAuditEvent({
+    event_type: 'MESSAGE',
+    sender: myUserName,
+    target: currentTarget,
+    message: text
+  });
+
+  // Stop typing
+  if (isCurrentlyTyping) {
+    isCurrentlyTyping = false;
+    realtimeChannel.send({
+      type: 'broadcast',
+      event: 'stopTyping',
+      payload: { user: myUserName }
+    });
+  }
+
+  $('#msgInput').val('');
+}
+
+function handleTypingKeystroke() {
+  if (!realtimeChannel) return;
+  if (!isCurrentlyTyping) {
+    isCurrentlyTyping = true;
+    realtimeChannel.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { user: myUserName, target: currentTarget }
+    });
+  }
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => {
+    isCurrentlyTyping = false;
+    realtimeChannel.send({
+      type: 'broadcast',
+      event: 'stopTyping',
+      payload: { user: myUserName }
+    });
+  }, 1200);
+}
+
+// Setup Event Listeners
+$(function() {
   $('#btnJoin').on('click', submitJoin);
-  $('#userName').on('keypress', function(e) {
+  $('#userName').on('keypress', (e) => {
     if (e.keyCode === 13) {
       submitJoin();
       e.preventDefault();
     }
   });
 
-  $('#chatForm').on('submit', function(e) {
+  $('#chatForm').on('submit', (e) => {
     e.preventDefault();
     submitMessage();
   });
 
   $('#msgInput').on('input', handleTypingKeystroke);
 
-  $('#chanGlobal').on('click', function() {
-    setTarget('All');
-  });
+  $('#chanGlobal').on('click', () => setTarget('All'));
+  $('#btnCancelPrivate').on('click', () => setTarget('All'));
 
-  $('#btnCancelPrivate').on('click', function() {
-    setTarget('All');
-  });
-
-  // Mobile menu buttons
   $('#btnOpenSidebar').on('click', openMobileSidebar);
   $('#btnCloseSidebar').on('click', closeMobileSidebar);
   $('#sidebarOverlay').on('click', closeMobileSidebar);
 
-  // Sound toggle
-  $('#btnSoundToggle').on('click', function() {
+  $('#btnSoundToggle').on('click', () => {
     soundEnabled = !soundEnabled;
     if (soundEnabled) {
       $('#iconSoundOn').removeClass('hidden');
@@ -390,16 +453,12 @@ $(function() {
     }
   });
 
-  // Quick emoji insertion
   $('.btn-emoji').on('click', function() {
-    var emoji = $(this).data('emoji');
-    var input = $('#msgInput');
+    const emoji = $(this).data('emoji');
+    const input = $('#msgInput');
     input.val(input.val() + emoji);
     input.focus();
   });
 
-  // Focus initial username input
-  setTimeout(function() {
-    $('#userName').focus();
-  }, 200);
+  setTimeout(() => $('#userName').focus(), 200);
 });
